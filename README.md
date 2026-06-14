@@ -300,4 +300,4 @@ This project is released under the [MIT License](LICENSE).
 
 ---
 
-*Data sourced from Open-Meteo — free, open, and no sign-up required.*
+*Data sourced from Open-Meteo*
