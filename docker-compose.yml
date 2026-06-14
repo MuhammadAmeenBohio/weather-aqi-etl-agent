@@ -1,0 +1,92 @@
+# =============================================================
+# Pakistan Weather & AQI Pipeline
+# Airflow 2.9 (LocalExecutor) + TimescaleDB
+# =============================================================
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    PYTHONPATH: /opt/airflow/project
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/dags
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${AIRFLOW_DB}
+    AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+    # Pipeline env — available inside all tasks
+    PIPELINE_DB_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@timescaledb:5432/${POSTGRES_DB}
+    WEATHER_API_URL: ${WEATHER_API_URL}
+    AQI_API_URL:     ${AQI_API_URL}
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - .:/opt/airflow/project
+    - airflow_logs:/opt/airflow/logs
+  depends_on:
+    timescaledb:
+      condition: service_healthy
+
+services:
+
+  # -----------------------------------------------------------
+  # TimescaleDB — pipeline data + Airflow metadata (2 DBs)
+  # -----------------------------------------------------------
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: pk_weather_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       ${POSTGRES_DB}
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sh:/docker-entrypoint-initdb.d/00_init_db.sh:ro
+      - ./init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -----------------------------------------------------------
+  # Airflow webserver — UI on localhost:8080
+  # -----------------------------------------------------------
+  airflow_webserver:
+    <<: *airflow-common
+    container_name: pk_weather_airflow_webserver
+    restart: unless-stopped
+    command: webserver
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # -----------------------------------------------------------
+  # Airflow scheduler — runs DAGs, sensors, and retries
+  # -----------------------------------------------------------
+  airflow_scheduler:
+    <<: *airflow-common
+    container_name: pk_weather_airflow_scheduler
+    restart: unless-stopped
+    command: scheduler
+
+  # -----------------------------------------------------------
+  # One-shot init — DB migrate + admin user creation
+  # Runs once, exits cleanly
+  # -----------------------------------------------------------
+  airflow_init:
+    <<: *airflow-common
+    container_name: pk_weather_airflow_init
+    restart: "no"
+    command: bash -c "airflow db migrate && airflow users create --username ${AIRFLOW_ADMIN_USER} --password ${AIRFLOW_ADMIN_PASSWORD} --firstname Admin --lastname User --role Admin --email ${AIRFLOW_ADMIN_EMAIL}"
+
+volumes:
+  timescaledb_data:
+  airflow_logs:
