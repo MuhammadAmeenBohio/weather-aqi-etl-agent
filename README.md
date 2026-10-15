@@ -171,8 +171,8 @@ weather-etl-pipeline/
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-username/weather-etl-pipeline.git
-cd weather-etl-pipeline
+git clone https://github.com/MuhammadAmeenBohio/weather-aqi-etl-agent.git
+cd weather-aqi-etl-agent
 ```
 
 ### 2. Configure Environment
